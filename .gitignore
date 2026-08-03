@@ -1,0 +1,28 @@
+# ROS 2 / colcon build artifacts — never commit these
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Model weights / engines (large binaries — link or document instead of committing)
+*.engine
+*.pt
+*.pth
+*.onnx
+
+# Captured output frames
+*_detected.jpg
+frame.jpg
+live_detected.jpg
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
