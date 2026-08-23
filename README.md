@@ -90,7 +90,7 @@ Set the target class and the engine path at the top of each file. For approach, 
 
 ## The messy part
 
-Most of the real work here wasn't the ML, but a corrupted ROS 2 environment, a DHCP failure that only handed out IPv6, and chasing "the robot won't move" through the entire ROS graph only to find the motor controller was crashing on a loose power cable. That's all written up in **[docs/DEBUGGING.md](docs/DEBUGGING.md)**.
+Most of the real work here wasn't the ML, but a corrupted ROS 2 environment, a DHCP failure that only handed out IPv6, and chasing "the robot won't move" through the entire ROS graph only to find the motor controller was crashing on a loose power cable. See **[docs/DEBUGGING.md](docs/DEBUGGING.md)**.
 
 ## License
 
