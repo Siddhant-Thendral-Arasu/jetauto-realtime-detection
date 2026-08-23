@@ -9,6 +9,8 @@ approach.
 
 Requires the `clip` library at runtime (used to embed the text prompts):
     pip install clip-anytorch --break-system-packages
+
+Exclusively for camera and imported YOLO model testing
 """
 
 import rclpy
