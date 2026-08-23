@@ -1,36 +1,47 @@
-# JetAuto Perception — Real-Time Object Detection on a Jetson Robot
+# JetAuto Perception & Autonomy
 
-Real-time, GPU-accelerated object detection running on a Hiwonder JetAuto Pro (NVIDIA Jetson Orin Nano), built with ROS 2 Humble. A ROS 2 node subscribes to the robot's live camera feed and runs a TensorRT-optimized YOLO model on every frame, labeling objects in real time — fully on-device, no internet required at runtime.
+A Hiwonder JetAuto Pro (NVIDIA Jetson Orin Nano) that sees, tracks, and drives toward objects on its own. It runs ROS 2 Humble, does all of its inference on-device with a TensorRT-compiled YOLO model, and needs no internet at runtime.
 
-> **Status:** working. Live detection runs on the robot's GPU. Open-vocabulary detection (YOLOE, text-promptable) is implemented and runs once its CLIP dependency is installed — see [Roadmap](#roadmap).
+I started with plain object detection and kept going: detect → turn to face a target → drive up to it using the depth camera. Each node builds on the last.
 
-<!-- TODO: drop your demo clip/GIF here. Even a phone video of the screen works. -->
-<!-- ![demo](media/demo.gif) -->
-
----
+> **Status:** working on real hardware. Detection, visual tracking, and depth-based approach all run on the robot. Open-vocabulary detection (YOLOE) is written and runs once its CLIP dependency is installed — more on that below.
 
 ## What it does
 
-- Subscribes to the robot's depth-camera RGB stream (`/depth_cam/rgb/image_raw`) over ROS 2.
-- Runs a **TensorRT-compiled YOLO engine** on the Jetson GPU for each frame (real-time inference).
-- Logs detected object classes live and writes annotated frames to disk (optional live display window).
-- Runs **entirely offline** — the compiled engine ships with the model; no network needed to detect.
+The robot subscribes to its own camera over ROS 2 and runs YOLO on every frame, on the Jetson's GPU, in real time. That's the base. On top of it:
 
-## Why it's built this way (design decisions)
+- **`my_detect.py`** — the detector. TensorRT engine, COCO classes, writes annotated frames and logs what it sees. Offline.
+- **`track_node.py`** — turns the robot to keep a named object centered in frame. Proportional control on `/cmd_vel`.
+- **`approach_node.py`** — drives toward the target and stops at a set distance, reading real meters off the depth camera. Includes a search behavior: lose the target and it sweeps to reacquire, giving up after a full rotation.
 
-- **TensorRT engine, not a raw `.pt` model.** On a Jetson, the win is edge-optimized inference. Loading a pre-compiled `.engine` through Ultralytics' `YOLO()` runs GPU-accelerated inference with minimal overhead — the same deployment pattern used in production robotics.
-- **Two detection modes, chosen deliberately:**
-  - **Fixed-vocabulary (this repo, default):** a TensorRT YOLO engine over the standard COCO classes. Fast, offline, reliable.
-  - **Open-vocabulary (YOLOE):** text-promptable detection ("find the *mug*") without retraining — the more flexible, more current approach. Chosen over reflexively grabbing the newest YOLO release because *newest-that-works* beats *newest-that-exists* for a deployed system. Requires a one-time `clip` install (see Roadmap).
-- **Own node, not the vendor demo.** The robot ships a detection example; this node was written from scratch (learning the engine-loading pattern from the vendor code, then implementing an independent node) so the pipeline is fully understood end to end.
+Everything past detection is a control loop: camera in, velocity command out, repeat.
 
-## Architecture
+## Decisions Taken
+
+**TensorRT engine instead of a raw `.pt` file.** On a Jetson the whole point is edge-optimized inference. Loading a pre-compiled `.engine` through Ultralytics runs GPU-accelerated with almost no overhead. It's how you'd actually deploy this, not just how you'd prototype it.
+
+**Depth camera for distance, not a bounding-box trick.** My first approach node guessed distance from how tall the person's box was. It worked until I found out standing close enough that you fill the frame and maxes out the box height, so the robot thinks you're far and never stops. The fix was to sample the actual depth stream at the target's center and work in meters. No saturation, and it works for any object regardless of how it's framed.
+
+**I don't stop the instant the target disappears.** Detection flickers. Drop into "lost" mode on a single missed frame and the robot fidgets constantly. So a few missed frames are tolerated before it reacts, and when it does lose the target it keeps turning toward where it last saw it before searching. Small thing, big difference in how it feels.
+
+**My own nodes, not the vendor demo.** The robot ships with a detection example. I read it to learn the engine-loading pattern, then wrote these from scratch so I understood every piece, which mattered a lot when things broke.
+
+## How the nodes fit together
 
 ```
-[Depth camera] --/depth_cam/rgb/image_raw--> [detection node] --> annotated frames + class labels
-                          (ROS 2 Image)            |
-                                         YOLO TensorRT engine
-                                          (Jetson GPU inference)
+my_detect.py      perception    load the engine, run inference on a frame
+      |
+track_node.py     behavior      find the target, turn to center it
+      |
+approach_node.py  behavior      + read depth, drive toward it, search if lost
+```
+
+`track_node` imports `my_detect`; `approach_node` imports both. Keep all three in the same directory.
+
+```
+[depth camera] --/depth_cam/rgb/image_raw--> [node] --/cmd_vel--> [motors]
+                                               |
+                                        YOLO TensorRT engine (Jetson GPU)
 ```
 
 ## Hardware / software
@@ -40,43 +51,46 @@ Real-time, GPU-accelerated object detection running on a Hiwonder JetAuto Pro (N
 | Robot | Hiwonder JetAuto Pro |
 | Compute | NVIDIA Jetson Orin Nano |
 | OS / middleware | Ubuntu 22.04, ROS 2 Humble |
-| Inference | PyTorch 2.7 (CUDA), Ultralytics, TensorRT |
-| Camera | Orbbec Astra Pro Plus (depth cam, RGB stream used) |
+| Inference | PyTorch (CUDA), Ultralytics, TensorRT |
+| Camera | Orbbec Astra Pro Plus (RGB + depth) |
 
-## Repository layout
+## Layout
 
 ```
 nodes/
-  my_detect.py        # TensorRT YOLO detection node (offline, fixed-vocab) — the working node
-  live_detect.py      # open-vocab YOLOE detection node (needs `clip`)
+  my_detect.py       detector (offline, fixed-vocab) — the base node
+  track_node.py      turn-to-center behavior
+  approach_node.py   depth-based approach + search
+  live_detect.py     open-vocab YOLOE detector (needs clip)
 docs/
-  DEBUGGING.md         # engineering log: the hard problems and how they were solved
+  DEBUGGING.md       the log of everything that went wrong and how I fixed it
 README.md
-.gitignore
 ```
 
 ## Running it
 
-On the robot (ROS 2 Humble sourced, camera driver up):
+Source ROS 2 and bring the camera up first, then:
 
 ```bash
-python3 nodes/my_detect.py
+python3 nodes/my_detect.py       # just detection
+python3 nodes/track_node.py      # detect + turn to face a target
+python3 nodes/approach_node.py   # detect + turn + drive toward it
 ```
 
-Then place objects in front of the camera — detected classes stream to the console and annotated frames are written to `~/my_detected.jpg`. For a live window, uncomment the `cv2.imshow` lines in the callback.
+Set the target class and the engine path at the top of each file. For approach, run it on the floor with room to move and a hand near Ctrl-C the first time.
 
-<!-- Note: paths to the .engine file are set at the top of my_detect.py; adjust to your model location. -->
+## What's next
 
-## Roadmap
+- [x] Real-time TensorRT detection on the robot (offline)
+- [x] Turn to center a named object
+- [x] Depth-based approach with a search-and-reacquire behavior
+- [ ] Open-vocab detection (YOLOE + CLIP) — written, waiting on a `clip` install
+- [ ] Grab it: 3D position from depth → inverse kinematics → the arm picks it up
+- [ ] Natural-language control: say what you want, the robot plans and does it
 
-- [x] Live TensorRT YOLO detection on the robot's camera (offline)
-- [ ] Open-vocabulary detection (YOLOE + CLIP) — implemented in `live_detect.py`, pending `clip` install
-- [ ] Detection-driven behavior (center on / approach a named object)
-- [ ] Language-conditioned control: natural-language instruction → VLM planner → navigation/manipulation (the Nav2 stack and a vendor VLM+camera example are already on the platform)
+## The messy part
 
-## Engineering log
-
-The interesting part of embedded robotics is everything that goes wrong. See **[docs/DEBUGGING.md](docs/DEBUGGING.md)** for the real problems solved along the way — a corrupted ROS 2 environment, an IPv6-only DHCP failure, and pivoting to an offline TensorRT engine when a dependency couldn't be downloaded.
+Most of the real work here wasn't the ML, but a corrupted ROS 2 environment, a DHCP failure that only handed out IPv6, and chasing "the robot won't move" through the entire ROS graph only to find the motor controller was crashing on a loose power cable. That's all written up in **[docs/DEBUGGING.md](docs/DEBUGGING.md)**.
 
 ## License
 
