@@ -26,7 +26,7 @@ class Grasp(Node):
 		while self.pub.get_subscription_count() == 0 and time.time() < deadline:
 			time.sleep(0.05)
 		if self.pub.get_subscription_count() == 0:
-			sef.get_logger().error('no subscriber -- is ros_robot_controller running?')
+			self.get_logger().error('no subscriber -- is ros_robot_controller running?')
 			return False
 		for _ in range(3):
 			self.pub.publish(msg)
