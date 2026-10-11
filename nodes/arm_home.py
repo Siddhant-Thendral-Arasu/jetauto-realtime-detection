@@ -30,7 +30,7 @@ def main():
 		end = time.time() + 3.0
 		while time.time() < end and rclpy.ok():
 			rclpy.spin_once(node, timeout_sec=0.1)
-	except KeybordInterrupt:
+	except KeyboardInterrupt:
 		pass
 	finally:
 		node.destroy_node()
