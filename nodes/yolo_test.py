@@ -8,7 +8,7 @@ if img is None:
 	print("No frame detected")
 else:
 	results = model.predict(img, conf=0.25)
-	cv2.imwrite('/home/ubunut/detected.jpg', results[0].plot())
+	cv2.imwrite('/home/ubuntu/detected.jpg', results[0].plot())
 	for box in results[0].boxes:
 		print(f"Found: {model.names[int(box.cls)]} ({float(box.conf):.2f})")
 	print("Saved to /home/ubuntu/detected.jpg")
